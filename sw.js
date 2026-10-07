@@ -1,5 +1,5 @@
 // Offline cache: bump VERSION (and APP_VERSION in index.html) whenever app files change.
-const VERSION = 'eightydom-v1';
+const VERSION = 'eightydom-v2';
 const FILES = ['./', 'index.html', 'manifest.json', 'icon-180.png', 'icon-512.png',
   'vendor/pdf.min.js', 'vendor/pdf.worker.min.js', 'vendor/xlsx.full.min.js'];
 

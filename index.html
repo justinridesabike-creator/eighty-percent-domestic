@@ -84,7 +84,12 @@ main { padding: 16px; max-width: 1100px; margin: 0 auto; }
 .tile.done { opacity: .55; min-height: 58px; }
 .tile.done .b { font-size: 20px; }
 .tile .tag { display: inline-block; font-size: 10px; font-weight: 900; padding: 1px 5px; border-radius: 5px; color: #fff; background: var(--lap); }
-.tile .tag.p { background: var(--pull); } .tile .tag.o { background: var(--over); }
+.tile .tag.p { background: var(--pull); } .tile .tag.o { background: var(--over); } .tile .tag.w { background: var(--accent); }
+.tile.watchme { border-style: dashed; border-color: var(--accent); border-width: 3px; }
+.lapcol div.est { font-style: italic; opacity: .8; }
+.sus { background: var(--card); border: 2px dashed var(--accent); border-radius: 12px; padding: 8px 10px; margin-bottom: 10px; font-size: 14px; }
+.sus div { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 4px 0; flex-wrap: wrap; }
+.sec .btn { margin-left: auto; text-transform: none; letter-spacing: 0; }
 
 .pad { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; align-self: start; position: sticky; top: var(--padtop, 240px); }
 .disp { font-size: 34px; font-weight: 900; text-align: center; min-height: 52px; border-radius: 10px; background: var(--chip); font-variant-numeric: tabular-nums; padding: 4px; }
@@ -156,6 +161,7 @@ table.list td.num { text-align: right; font-variant-numeric: tabular-nums; }
   </div>
   <div class="work">
     <div>
+      <div id="sus"></div>
       <div class="sec" id="toComeHead">Still to come</div>
       <div class="tiles" id="toCome"></div>
       <div class="sec div" id="throughHead">Through this lap</div>
@@ -176,14 +182,14 @@ table.list td.num { text-align: right; font-variant-numeric: tabular-nums; }
 </section>
 
 <div id="modal" class="modal hidden"><div class="sheet" id="sheet"></div></div>
-<div id="toast" class="toast hidden"><span id="toastMsg"></span><button id="toastBtn"></button></div>
+<div id="toast" class="toast hidden"><span id="toastMsg"></span><button id="toastBtn2"></button><button id="toastBtn"></button></div>
 <input id="fileInput" type="file" accept=".csv,.txt,.xlsx,.xls,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="hidden">
 
 <script src="vendor/pdf.min.js"></script>
 <script src="vendor/xlsx.full.min.js"></script>
 <script>
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
-const APP_VERSION = 1;
+const APP_VERSION = 2;
 const $ = s => document.querySelector(s);
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
@@ -199,6 +205,7 @@ function fmtDur(ms) {
   const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, ss = String(s % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
+function fmtGap(g) { return g > 0 ? '+' + fmtDur(g) : 'Leader'; }
 function fmtClock(t) { return new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' }); }
 function parseDur(s) {
   const t = String(s).trim(), m = t.match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
@@ -309,7 +316,7 @@ async function fileToRiders(file) {
 let cur = null;
 function riderOf(r, bib) { return r.riders.find(x => x.bib === bib); }
 function passes(r, bib) { return r.passes[bib] || []; }
-function leaderAt(r, k) { let best = null; for (const t of Object.values(r.passes)) if (t[k - 1] != null && (best == null || t[k - 1] < best)) best = t[k - 1]; return best; }
+function leaderAt(r, k) { let best = null; for (const [bib, t] of Object.entries(r.passes)) if (t[k - 1] != null && !isEst(r, bib, k) && (best == null || t[k - 1] < best)) best = t[k - 1]; return best; }
 function rounds(r) { let n = 0; for (const t of Object.values(r.passes)) n = Math.max(n, t.length); return n; }
 // Reference lap ("100%"): set by hand (pull time / 0.8), else the leader's time from the start to the zone on lap 1,
 // else the leader's lap 2 (zone to zone).
@@ -330,6 +337,83 @@ function level(share) { return share == null ? null : share >= 0.8 ? 'over' : sh
 function gapOf(r, bib, k) { const t = passes(r, bib)[k - 1], l = leaderAt(r, k); return t != null && l != null ? t - l : null; }
 function out(r, bib) { return r.pulled[bib] ? 'pulled' : r.dnf[bib] ? 'dnf' : null; }
 function racing(r, bib) { return !out(r, bib); }
+
+/* ---------- Missed taps ---------- */
+// With big groups some riders go through untapped. Those laps get an estimated time (r.est[bib] = lap numbers),
+// shown with "~". Estimates never count as the leader's time and never pull anyone.
+function isEst(r, bib, k) { return !!(r.est && r.est[bib] && r.est[bib].includes(k)); }
+function realPass(r, bib, k) { const t = passes(r, bib)[k - 1]; return t != null && !isEst(r, bib, k) ? t : null; }
+function lastIsEst(r, bib) { return isEst(r, bib, passes(r, bib).length); }
+// The leader's latest lap (zone to zone), else the reference lap.
+function lapLen(r) { for (let m = rounds(r); m >= 2; m--) { const a = leaderAt(r, m), b = leaderAt(r, m - 1); if (a && b) return a - b; } return baseOf(r); }
+// Riders who came through with this rider on lap k (within 10 s, or the nearest each side within 30 s).
+function mates(r, bib, k) {
+  const me = realPass(r, bib, k); if (me == null) return [];
+  const W = Math.max(10000, 0.03 * (lapLen(r) || 0));
+  const c = r.riders.filter(x => x.bib !== bib && realPass(r, x.bib, k) != null).map(x => ({ bib: x.bib, d: realPass(r, x.bib, k) - me }));
+  let m = c.filter(o => Math.abs(o.d) <= W);
+  if (!m.length) m = [c.filter(o => o.d < 0 && o.d >= -30000).sort((a, b) => b.d - a.d)[0], c.filter(o => o.d > 0 && o.d <= 30000).sort((a, b) => a.d - b.d)[0]].filter(Boolean);
+  return m.sort((a, b) => Math.abs(a.d) - Math.abs(b.d)).slice(0, 4).map(o => o.bib);
+}
+function median(a) { a = [...a].sort((x, y) => x - y); const h = a.length >> 1; return a.length % 2 ? a[h] : (a[h - 1] + a[h]) / 2; }
+// Estimate a missed lap m: move with the riders they were with on their nearest real lap; otherwise keep their gap
+// to the leader (between their gaps before and after); otherwise the back of the field.
+function estimate(r, bib, m) {
+  const p = passes(r, bib);
+  let a = null, b = null;
+  for (let j = m - 1; j >= 1 && a == null; j--) if (realPass(r, bib, j) != null) a = j;
+  for (let j = m + 1; j <= p.length && b == null; j++) if (realPass(r, bib, j) != null) b = j;
+  let t = null, from = '';
+  for (const anc of [a, b]) {
+    if (anc == null || t != null) continue;
+    const ms = mates(r, bib, anc).filter(o => realPass(r, o, m) != null);
+    if (ms.length) { t = p[anc - 1] + median(ms.map(o => realPass(r, o, m) - realPass(r, o, anc))); from = 'with #' + ms.join(', #'); }
+  }
+  if (t == null) {
+    const L = leaderAt(r, m), ga = a ? gapOf(r, bib, a) : null, gb = b ? gapOf(r, bib, b) : null;
+    if (L != null && (ga != null || gb != null)) { t = L + (ga != null && gb != null ? ga + (gb - ga) * (m - a) / (b - a) : (ga ?? gb)); from = 'same gap as their other laps'; }
+  }
+  if (t == null) { const ts = r.riders.map(x => realPass(r, x.bib, m)).filter(v => v != null); t = ts.length ? Math.max(...ts) : Date.now(); from = 'time unknown'; }
+  const lo = p[m - 2], hi = p[m];
+  if (lo != null && t <= lo) t = lo + 1000;
+  if (hi != null && t >= hi) t = hi - 1000;
+  return { t: Math.round(t), from };
+}
+function reestimateAll(r) {
+  for (const bib of Object.keys(r.est || {})) for (const m of [...r.est[bib]].sort((a, b) => a - b)) r.passes[bib][m - 1] = estimate(r, bib, m).t;
+}
+function addEst(r, bib) { const arr = r.passes[bib] = r.passes[bib] || []; arr.push(null); r.est = r.est || {}; (r.est[bib] = r.est[bib] || []).push(arr.length); }
+function dropEst(r, bib, k) { if (!isEst(r, bib, k)) return; r.est[bib] = r.est[bib].filter(m => m !== k); if (!r.est[bib].length) delete r.est[bib]; }
+// How many laps a tap stands for: 1 normally; 2+ when, as one lap, the rider would have lost about a whole lap
+// against their last gap but, counted as n laps, they're back on their usual gap: they came through untapped.
+// When neither fits clearly, the closer one is used and alt is the other, offered on the banner (never a pop-up:
+// more riders may be arriving).
+function lapsSince(r, bib, now) {
+  const k = passes(r, bib).length, R = rounds(r), L = lapLen(r);
+  if (leaderAt(r, k + 1) == null || !L) return { n: 1 };
+  const gp = k ? gapOf(r, bib, k) || 0 : 0;
+  // q: change in the rider's gap (in laps) if this tap is n laps on. Losing time is common, gaining a lot is not.
+  const qs = [];
+  for (let n = 1; k + n <= R + 1; n++) qs.push({ n, q: (now - (leaderAt(r, k + n) ?? leaderAt(r, R) + L * (k + n - R)) - gp) / L });
+  if (qs[0].q < 0.45) return { n: 1 };
+  const cost = q => q < 0 ? -2 * q : q, by = [...qs].sort((a, b) => cost(a.q) - cost(b.q)), best = by[0];
+  if (best.n === 1) return { n: 1, alt: by[1] && cost(by[1].q) < 0.5 ? by[1].n : undefined };
+  if (qs[0].q >= 0.75 && cost(best.q) <= 0.25) return { n: best.n };
+  return cost(best.q) < cost(qs[0].q) / 2 ? { n: best.n, alt: 1 } : { n: 1, alt: best.n };
+}
+// Riders not yet tapped whose group came through a while ago.
+function suspects(r) {
+  const R = rounds(r), L = lapLen(r) || 0, now = Date.now(), out2 = [];
+  for (const x of r.riders) {
+    if (!racing(r, x.bib)) continue;
+    const k = passes(r, x.bib).length; if (!k || k >= R) continue;
+    const ms = mates(r, x.bib, k), ts = ms.map(o => realPass(r, o, k + 1)).filter(v => v != null);
+    if (!ms.length || ts.length < Math.ceil(ms.length / 2)) continue;
+    const ago = now - median(ts);
+    if (ago > Math.max(60000, 0.1 * L)) out2.push({ x, ms: ms.filter(o => realPass(r, o, k + 1) != null), ago, lap: k + 1 });
+  }
+  return out2;
+}
 
 /* ---------- Home ---------- */
 function renderHome() {
@@ -428,16 +512,17 @@ function renderTop(r) {
        <span class="key watch">50% +${fmtDur(base * 0.5)}</span><span class="key alert">75% +${fmtDur(base * 0.75)}</span><span class="key over">80% +${fmtDur(base * 0.8)}</span>`
     : `<span>Pull time: <b>after the leader's first lap</b> (tap Start race at the gun)</span><button class="btn small" id="cutBtn">Set by hand</button>`;
   const on = r.riders.filter(x => racing(r, x.bib)), thr = on.filter(x => passes(r, x.bib).length >= R && R);
-  $('#status').innerHTML = R ? `<b>Lap ${R}</b> · ${thr.length} through · ${on.length - thr.length} still to come · ${Object.keys(r.pulled).length} pulled${Object.keys(r.dnf).length ? ' · ' + Object.keys(r.dnf).length + ' DNF' : ''}` : `${r.riders.length} riders · waiting for the first pass`;
+  $('#status').innerHTML = R ? `<b>Lap ${R}</b> · ${thr.length} through · ${on.length - thr.length} still to come · ${Object.keys(r.pulled).length} pulled${Object.keys(r.dnf).length ? ' · ' + Object.keys(r.dnf).length + ' DNF' : ''}${thr.filter(x => isEst(r, x.bib, R)).length ? ' · ' + thr.filter(x => isEst(r, x.bib, R)).length + ' estimated (~)' : ''}` : `${r.riders.length} riders · waiting for the first pass`;
 }
 function allThrough(r) { const R = rounds(r); const on = r.riders.filter(x => racing(r, x.bib)); return R > 0 && on.length > 0 && on.every(x => passes(r, x.bib).length >= R); }
 function tileHtml(r, x, done) {
   const p = passes(r, x.bib), k = p.length, g = k ? gapOf(r, x.bib, k) : null, base = baseOf(r), R = rounds(r);
   const lv = g != null && base ? level(g / base) : null, lapped = !done && racing(r, x.bib) && R >= 2 && k < R - 1;
   const cls = ['tile', done ? 'done' : '', lv === 'over' ? 'alert' : lv || '', lapped ? 'lapped' : ''].join(' ');
-  const tag = r.pulled[x.bib] ? '<span class="tag p">PULLED</span>' : r.dnf[x.bib] ? '<span class="tag">DNF</span>' : lapped ? '<span class="tag">LAPPED</span>' : lv === 'over' ? '<span class="tag o">PULL</span>' : '';
-  return `<div class="${cls}" data-bib="${esc(x.bib)}"><div class="b">${esc(x.bib)}</div><div class="n">${esc(x.name || '')}</div>
-    <div class="g">${tag || (k ? (g ? '+' + fmtDur(g) : 'Leader') + ' · L' + k : '')}</div></div>`;
+  const est = k && isEst(r, x.bib, k), watch = est && !done;
+  const tag = r.pulled[x.bib] ? '<span class="tag p">PULLED</span>' : r.dnf[x.bib] ? '<span class="tag">DNF</span>' : lapped ? '<span class="tag">LAPPED</span>' : lv === 'over' ? '<span class="tag o">PULL</span>' : watch ? `<span class="tag w">WATCH · missed L${k}</span>` : '';
+  return `<div class="${cls}${watch ? ' watchme' : ''}" data-bib="${esc(x.bib)}"><div class="b">${esc(x.bib)}</div><div class="n">${esc(x.name || '')}</div>
+    <div class="g">${tag || (k ? (est ? '~' : '') + (fmtGap(g)) + ' · L' + k + (est ? ' est.' : '') : '')}</div></div>`;
 }
 function renderTiles(r) {
   const R = rounds(r);
@@ -448,7 +533,9 @@ function renderTiles(r) {
   const toCome = on.filter(x => !R || passes(r, x.bib).length < R)
     .sort((a, b) => passes(r, b.bib).length - passes(r, a.bib).length || lastT(a) - lastT(b));
   const thr = on.filter(x => R && passes(r, x.bib).length >= R).sort((a, b) => passes(r, a.bib)[R - 1] - passes(r, b.bib)[R - 1]);
-  $('#toComeHead').textContent = R ? `Still to come on lap ${R} · ${toCome.length}` : `Riders · ${toCome.length} · tap each one as they pass`;
+  $('#toComeHead').innerHTML = R ? `<span>Still to come on lap ${R} · ${toCome.length}</span>${toCome.length && !r.finished ? '<button class="btn small" id="closeBtn">All through</button>' : ''}` : `Riders · ${toCome.length} · tap each one as they pass`;
+  const sus = R ? suspects(r) : [];
+  $('#sus').innerHTML = sus.length ? `<div class="sus"><b>Maybe missed: their group came through</b>${sus.map(o => `<div><span><b>#${esc(o.x.bib)}</b> ${esc(o.x.name || '')} · with #${o.ms.map(esc).join(', #')} on lap ${o.lap - 1}, who passed at ${fmtClock(Date.now() - o.ago)}</span><button class="btn small" data-withgroup="${esc(o.x.bib)}">Through with group</button></div>`).join('')}</div>` : '';
   $('#toCome').innerHTML = toCome.map(x => tileHtml(r, x, false)).join('') || '<div class="status">Everyone still racing is through this lap.</div>';
   $('#throughHead').textContent = R ? `Through lap ${R} · ${thr.length} (tap again on their next lap)` : '';
   $('#throughHead').classList.toggle('hidden', !R);
@@ -467,9 +554,10 @@ function renderTab(r) {
     const cols = [];
     for (let k = R; k >= 1; k--) {
       const list = r.riders.filter(x => passes(r, x.bib)[k - 1] != null).sort((a, b) => passes(r, a.bib)[k - 1] - passes(r, b.bib)[k - 1]);
-      cols.push(`<div class="lapcol"><h3>Lap ${k} · ${list.length} passed</h3>${list.map((x, i) => {
-        const g = gapOf(r, x.bib, k), lv = base && g != null ? level(g / base) : null;
-        return `<div class="${lv === 'over' ? 'alert' : lv || ''}"><span>${i + 1}.</span><span>#${esc(x.bib)} ${esc(x.name || '')}</span><span>${g ? '+' + fmtDur(g) : 'Leader'}</span></div>`;
+      const ne = list.filter(x => isEst(r, x.bib, k)).length;
+      cols.push(`<div class="lapcol"><h3>Lap ${k} · ${list.length} passed${ne ? ` (${ne} ~estimated)` : ''}</h3>${list.map((x, i) => {
+        const g = gapOf(r, x.bib, k), e = isEst(r, x.bib, k), lv = !e && base && g != null ? level(g / base) : null;
+        return `<div class="${lv === 'over' ? 'alert' : lv || ''}${e ? ' est' : ''}"><span>${i + 1}.</span><span>#${esc(x.bib)} ${esc(x.name || '')}</span><span>${e ? '~' : ''}${fmtGap(g)}</span></div>`;
       }).join('')}</div>`);
     }
     body.innerHTML = cols.length ? `<div class="laps">${cols.join('')}</div>` : '<p class="status">The passing order for each lap appears here as you tap riders.</p>';
@@ -482,7 +570,7 @@ function renderTab(r) {
   } else if (tab === 'riders') {
     body.innerHTML = `<table class="list"><thead><tr><th>Bib</th><th>Rider</th><th>Team</th><th class="num">Laps</th><th class="num">Last gap</th><th>Status</th><th></th></tr></thead><tbody>${r.riders.map(x => {
       const k = passes(r, x.bib).length, g = k ? gapOf(r, x.bib, k) : null, st = out(r, x.bib);
-      return `<tr><td><b>${esc(x.bib)}</b></td><td>${esc(x.name)}</td><td>${esc(x.team)}</td><td class="num">${k}</td><td class="num">${g != null ? (g ? '+' + fmtDur(g) : 'Leader') : ''}</td><td>${st === 'pulled' ? 'Pulled' : st === 'dnf' ? 'DNF' : 'Racing'}</td>
+      return `<tr><td><b>${esc(x.bib)}</b></td><td>${esc(x.name)}</td><td>${esc(x.team)}</td><td class="num">${k}</td><td class="num">${g != null ? (fmtGap(g)) : ''}</td><td>${st === 'pulled' ? 'Pulled' : st === 'dnf' ? 'DNF' : 'Racing'}</td>
         <td><button class="btn small" data-dnf="${esc(x.bib)}">${r.dnf[x.bib] ? 'Undo DNF' : 'DNF'}</button> <button class="btn small" data-pull="${esc(x.bib)}">${r.pulled[x.bib] ? 'Back in race' : 'Pull'}</button>${k ? ` <button class="btn small" data-droplast="${esc(x.bib)}">Remove last pass</button>` : ''}</td></tr>`;
     }).join('')}</tbody></table>`;
   } else {
@@ -502,52 +590,93 @@ function pulledOrder(r) {
 
 /* ---------- Recording passes ---------- */
 let undo = [];
-function snapshot(r) { return JSON.stringify({ passes: r.passes, pulled: r.pulled, dnf: r.dnf, log: r.log, riders: r.riders, startAt: r.startAt, cutOverride: r.cutOverride, finished: r.finished }); }
+function snapshot(r) { return JSON.stringify({ passes: r.passes, pulled: r.pulled, dnf: r.dnf, log: r.log, riders: r.riders, startAt: r.startAt, cutOverride: r.cutOverride, finished: r.finished, est: r.est || {} }); }
 function remember(r) { undo.push({ id: r.id, s: snapshot(r) }); if (undo.length > 50) undo.shift(); }
-function recordPass(bib) {
+function recordPass(bib, forceN, at) {
   const r = races[cur]; if (!r) return;
   bib = String(bib).replace(/^0+(?=\d)/, '');
   if (!bib) return;
-  const now = Date.now();
+  const now = at || Date.now();
   let x = riderOf(r, bib);
   if (!x) { if (!confirm(`#${bib} isn't on the start list. Add them and record the pass?`)) return; }
   if (out(r, bib)) { toast(`#${bib} is ${out(r, bib) === 'pulled' ? 'pulled' : 'DNF'}. Use the Riders tab to put them back.`); return; }
-  const p = passes(r, bib);
-  if (p.length && now - p[p.length - 1] < 30000) { toast(`#${bib} was already recorded ${Math.round((now - p[p.length - 1]) / 1000)} s ago`); return; }
-  remember(r);
-  if (!x) { x = { bib, name: '', team: '', cat: '' }; r.riders.push(x); }
-  (r.passes[bib] = r.passes[bib] || []).push(now);
-  const k = r.passes[bib].length, g = gapOf(r, bib, k), base = baseOf(r), lv = base && g != null ? level(g / base) : null;
-  const lapped = rounds(r) > k;   // the leader has already passed again: this rider is a lap (or more) down
-  let msg = `#${bib}${x.name ? ' ' + x.name : ''}: ${g ? '+' + fmtDur(g) : 'leader'} · lap ${k}`;
-  if (!r.finished && (lv === 'over' || lapped)) {
-    r.pulled[bib] = now;
-    msg = `PULL #${bib}${x.name ? ' ' + x.name : ''}: ${lapped ? 'lapped' : '+' + fmtDur(g) + ' (' + Math.round(g / base * 100) + '% of lap 1)'} · marked pulled`;
-    r.log.push({ t: now, text: `#${bib} PULLED ${lapped ? '(lapped)' : '+' + fmtDur(g)}` });
-    save(); entry = ''; render();
-    toast(msg, { label: 'Keep racing', fn: () => { delete r.pulled[bib]; r.log.push({ t: Date.now(), text: `#${bib} kept racing` }); save(); render(); } }, true);
+  r.est = r.est || {};
+  const p = passes(r, bib), k0 = p.length, L = lapLen(r);
+  const lastReal = [...p.keys()].reverse().map(i => realPass(r, bib, i + 1)).find(v => v != null);
+  if (forceN == null && lastReal != null && now - lastReal < 30000) { toast(`#${bib} was already recorded ${Math.round((now - lastReal) / 1000)} s ago`); return; }
+  // Marked through by "All through" but tapped soon after: this is that lap's real time, not the next lap.
+  if (forceN == null && k0 && isEst(r, bib, k0) && L && now - p[k0 - 1] < 0.5 * L) {
+    remember(r); dropEst(r, bib, k0); p[k0 - 1] = now; reestimateAll(r);
+    const g = gapOf(r, bib, k0);
+    r.log.push({ t: now, text: `#${bib} ${fmtGap(g).toLowerCase()} L${k0} (was estimated)` });
+    save(); entry = ''; render(); toast(`#${bib}: lap ${k0} ${fmtGap(g).toLowerCase()} (replaces the estimate)`, { label: 'Undo', fn: undoLast });
     return;
   }
-  r.log.push({ t: now, text: `#${bib} ${g ? '+' + fmtDur(g) : 'leader'} L${k}` });
+  let n = forceN, alt = null;
+  if (n == null) {
+    const d = lapsSince(r, bib, now);
+    n = d.n; alt = d.alt;
+  }
+  remember(r);
+  if (!x) { x = { bib, name: '', team: '', cat: '' }; r.riders.push(x); }
+  for (let i = 1; i < n; i++) addEst(r, bib);
+  (r.passes[bib] = r.passes[bib] || []).push(now);
+  reestimateAll(r);
+  const k = r.passes[bib].length, g = gapOf(r, bib, k), base = baseOf(r), lv = base && g != null ? level(g / base) : null;
+  const lapped = rounds(r) > k;   // the leader has already passed again: this rider is a lap (or more) down
+  const missed = n > 1 ? ` · missed on lap ${[...Array(n - 1)].map((_, i) => k0 + 1 + i).join(', ')}: ` + [...Array(n - 1)].map((_, i) => { const m = k0 + 1 + i, e = estimate(r, bib, m); return `~${fmtGap(gapOf(r, bib, m)).toLowerCase()} (${e.from})`; }).join(', ') : '';
+  let msg = `#${bib}${x.name ? ' ' + x.name : ''}: ${fmtGap(g).toLowerCase()} · lap ${k}${missed}`;
+  const redo = m => () => { undoLast(true); recordPass(bib, m, now); };
+  const fix = n > 1 ? { label: 'It was one lap', fn: redo(1) } : alt ? { label: `Missed on lap ${k0 + 1}?`, fn: redo(alt) } : null;
+  const altNote = alt && n === 1 ? ` · lost ${fmtDur(g - (k0 ? gapOf(r, bib, k0) : 0))} in one lap: missed on lap ${k0 + 1}?` : alt ? '?' : '';
+  msg += altNote;
+  if (!r.finished && (lv === 'over' || lapped)) {
+    r.pulled[bib] = now;
+    msg = `PULL #${bib}${x.name ? ' ' + x.name : ''}: ${lapped ? 'lapped' : '+' + fmtDur(g) + ' (' + Math.round(g / base * 100) + '% of lap 1)'} · marked pulled${missed}${altNote}`;
+    r.log.push({ t: now, text: `#${bib} PULLED ${lapped ? '(lapped)' : '+' + fmtDur(g)}` });
+    save(); entry = ''; render();
+    toast(msg, [{ label: 'Keep racing', fn: () => { delete r.pulled[bib]; r.log.push({ t: Date.now(), text: `#${bib} kept racing` }); save(); render(); } }, fix].filter(Boolean), true);
+    return;
+  }
+  r.log.push({ t: now, text: `#${bib} ${fmtGap(g).toLowerCase()} L${k}${n > 1 ? ` (L${k0 + 1}${n > 2 ? '–' + (k - 1) : ''} missed, ~est.)` : ''}` });
   save(); entry = ''; render();
-  toast(msg, { label: 'Undo', fn: undoLast });
+  toast(msg, [fix, { label: 'Undo', fn: undoLast }].filter(Boolean));
 }
-function undoLast() {
+// "All through": everyone still racing came through this lap, including riders we didn't manage to tap.
+function closeLap(r) {
+  const R = rounds(r), miss = r.riders.filter(x => racing(r, x.bib) && passes(r, x.bib).length < R);
+  if (!miss.length) return;
+  if (!confirm(`Everyone is through lap ${R}?\n\n${miss.length} rider${miss.length > 1 ? 's' : ''} not tapped (#${miss.map(x => x.bib).join(', #')}) will be marked through with an estimated time from the riders they were with. Watch for them next lap; their real pass corrects the estimate.`)) return;
+  remember(r);
+  for (const x of miss) while (passes(r, x.bib).length < R) addEst(r, x.bib);
+  reestimateAll(r);
+  r.log.push({ t: Date.now(), text: `All through L${R}: #${miss.map(x => x.bib).join(', #')} estimated` });
+  save(); render(); toast(`Lap ${R} closed · ${miss.length} estimated (~)`, { label: 'Undo', fn: undoLast });
+}
+function throughWithGroup(r, bib) {
+  remember(r); addEst(r, bib); reestimateAll(r);
+  const k = passes(r, bib).length;
+  r.log.push({ t: Date.now(), text: `#${bib} ~L${k} with group` }); save(); render();
+  toast(`#${bib}: lap ${k} ~${fmtGap(gapOf(r, bib, k)).toLowerCase()} (${estimate(r, bib, k).from})`, { label: 'Undo', fn: undoLast });
+}
+function undoLast(quiet) {
   const u = undo.pop(); if (!u || !races[u.id]) { toast('Nothing to undo'); return; }
-  Object.assign(races[u.id], JSON.parse(u.s)); save(); render(); toast('Undone');
+  Object.assign(races[u.id], JSON.parse(u.s)); save(); render(); if (quiet !== true) toast('Undone');
 }
 
 /* ---------- Modal and toast ---------- */
 function openModal(html) { $('#sheet').innerHTML = html; $('#sheet').onclick = null; $('#modal').classList.remove('hidden'); }
 function closeModal() { $('#modal').classList.add('hidden'); }
-let toastTimer = null, toastAct = null;
+let toastTimer = null, toastActs = [];
+// act: one action or a list of up to two (shown as buttons on the banner).
 function toast(msg, act, bad) {
-  $('#toastMsg').textContent = msg; toastAct = act || null;
-  $('#toastBtn').textContent = act ? act.label : ''; $('#toastBtn').classList.toggle('hidden', !act);
+  toastActs = (Array.isArray(act) ? act : [act]).filter(Boolean);
+  $('#toastMsg').textContent = msg;
+  ['#toastBtn', '#toastBtn2'].forEach((id, i) => { const a = toastActs[i]; $(id).textContent = a ? a.label : ''; $(id).classList.toggle('hidden', !a); });
   $('#toast').className = 'toast' + (bad ? ' bad' : '');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.add('hidden'), bad ? 10000 : 5000);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => $('#toast').classList.add('hidden'), bad || toastActs.length > 1 || /\?$/.test(msg) ? 10000 : 5000);
 }
-$('#toastBtn').onclick = () => { const a = toastAct; toastAct = null; $('#toast').classList.add('hidden'); if (a) a.fn(); };
+['#toastBtn', '#toastBtn2'].forEach((id, i) => $(id).onclick = () => { const a = toastActs[i]; toastActs = []; $('#toast').classList.add('hidden'); if (a) a.fn(); });
 
 /* ---------- Events ---------- */
 $('#newBtn').onclick = newRace;
@@ -578,7 +707,7 @@ document.addEventListener('keydown', e => {
   else return;
   renderPad(races[cur]);
 });
-$('#undoBtn').onclick = undoLast;
+$('#undoBtn').onclick = () => undoLast();
 $('#tabs').onclick = e => { const b = e.target.closest('button'); if (!b) return; tab = b.dataset.t; renderTab(races[cur]); };
 $('#raceView').addEventListener('click', e => {
   const r = races[cur]; if (!r) return;
@@ -599,8 +728,10 @@ $('#raceView').addEventListener('click', e => {
   else if (t.dataset.dnf) { const bib = t.dataset.dnf; remember(r); if (r.dnf[bib]) delete r.dnf[bib]; else { r.dnf[bib] = Date.now(); delete r.pulled[bib]; } save(); render(); }
   else if (t.dataset.droplast) {
     const bib = t.dataset.droplast; if (!confirm(`Remove #${bib}'s last pass?`)) return;
-    remember(r); r.passes[bib].pop(); if (!r.passes[bib].length) delete r.passes[bib]; save(); render();
+    remember(r); dropEst(r, bib, r.passes[bib].length); r.passes[bib].pop(); if (!r.passes[bib].length) delete r.passes[bib]; reestimateAll(r); save(); render();
   }
+  else if (t.id === 'closeBtn') closeLap(r);
+  else if (t.dataset.withgroup) throughWithGroup(r, t.dataset.withgroup);
   else if (t.id === 'finishBtn') { remember(r); r.finished = !r.finished; save(); render(); }
   else if (t.id === 'exportBtn') exportCsv(r);
   else if (t.id === 'addBtn') {
@@ -609,17 +740,17 @@ $('#raceView').addEventListener('click', e => {
     const n = prompt('Name (optional):') || ''; remember(r); r.riders.push({ bib: b.trim(), name: n.trim(), team: '', cat: '' }); save(); render();
   }
   else if (t.id === 'unstartBtn') { if (confirm('Clear the race start time?')) { remember(r); delete r.startAt; save(); render(); } }
-  else if (t.id === 'resetBtn') { if (confirm('Clear every pass, pull and DNF for this race?')) { remember(r); Object.assign(r, { passes: {}, pulled: {}, dnf: {}, log: [], finished: false }); delete r.startAt; save(); render(); } }
+  else if (t.id === 'resetBtn') { if (confirm('Clear every pass, pull and DNF for this race?')) { remember(r); Object.assign(r, { passes: {}, pulled: {}, dnf: {}, log: [], finished: false, est: {} }); delete r.startAt; save(); render(); } }
   else if (t.id === 'deleteBtn') { if (confirm('Delete this race from the iPad?')) { delete races[r.id]; save(); renderHome(); } }
 });
 function exportCsv(r) {
   const q = v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
-  const lines = [['Lap', 'Order', 'Bib', 'Name', 'Team', 'Time', 'Gap', 'Gap % of lap 1'].join(',')];
+  const lines = [['Lap', 'Order', 'Bib', 'Name', 'Team', 'Time', 'Gap', 'Gap % of lap 1', 'Estimated (missed tap)'].join(',')];
   const base = baseOf(r);
   for (let k = 1; k <= rounds(r); k++) {
     r.riders.filter(x => passes(r, x.bib)[k - 1] != null).sort((a, b) => passes(r, a.bib)[k - 1] - passes(r, b.bib)[k - 1]).forEach((x, i) => {
       const g = gapOf(r, x.bib, k);
-      lines.push([k, i + 1, x.bib, x.name, x.team, fmtClock(passes(r, x.bib)[k - 1]), fmtDur(g), base ? Math.round(g / base * 100) : ''].map(v => q(String(v ?? ''))).join(','));
+      lines.push([k, i + 1, x.bib, x.name, x.team, fmtClock(passes(r, x.bib)[k - 1]), fmtDur(g), base ? Math.round(g / base * 100) : '', isEst(r, x.bib, k) ? 'yes' : ''].map(v => q(String(v ?? ''))).join(','));
     });
   }
   lines.push('', 'Pulled order,Bib,Name,Laps,Pulled at');
@@ -629,7 +760,14 @@ function exportCsv(r) {
   else { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); }
 }
 // Clocks tick every second (tiles only change on taps).
-setInterval(() => { if (cur && races[cur]) renderTop(races[cur]); }, 1000);
+let susKey = '';
+setInterval(() => {
+  if (!cur || !races[cur]) return;
+  const r = races[cur]; renderTop(r);
+  // A rider joins the "maybe missed" list as time passes; redraw only when the list changes.
+  const k = rounds(r) ? suspects(r).map(o => o.x.bib).join() : '';
+  if (k !== susKey) { susKey = k; renderTiles(r); }
+}, 1000);
 
 $('#verTag').textContent = 'v' + APP_VERSION;
 $('#appVersion').textContent = `80% Domestic version ${APP_VERSION}`;
