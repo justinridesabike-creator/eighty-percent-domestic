@@ -14,4 +14,7 @@ reading when it's unclear. Estimates never count as the leader's time and never 
 
 Fast input (v3): tiles never move while you're tapping (they turn green in place; the grid tidies after 2.5 s);
 an Up next band shows the riders due in the next 90 s in expected order; the keypad suggests matching bibs, soonest
-first; Bunch gives a whole group the same time while you tap or type its riders in any order.
+first; Bunch gives a whole group the same time.
+
+Bunches (v4): tapping Bunch stamps the time as Bunch 1, 2, … with no riders; keep tapping riders behind it as normal.
+Later, tap Add riders on that bunch and tap or type its riders in any order; they get the bunch's time. Done ends it.

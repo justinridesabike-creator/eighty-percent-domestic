@@ -102,6 +102,13 @@ main { padding: 16px; max-width: 1100px; margin: 0 auto; }
 .bunchbox { margin-top: 10px; display: flex; gap: 8px; }
 .bunchbox .btn { flex: 1; min-height: 52px; font-weight: 800; }
 .bunchbox .btn.on { background: #ea580c; border-color: #ea580c; color: #fff; }
+.bunchfill { margin-top: 10px; background: #ea580c; color: #fff; border-radius: 10px; padding: 8px 10px; font-size: 14px; }
+.bunchfill small { font-size: 13px; opacity: .9; }
+.bunchrow { display: flex; gap: 6px; align-items: center; margin-top: 6px; font-size: 13px; }
+.bunchrow span { flex: 1; }
+#fillBanner { position: sticky; top: var(--padtop, 240px); z-index: 5; }
+.fillbanner { background: #ea580c; color: #fff; border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; font-weight: 600; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.fillbanner .btn { margin-left: auto; color: #ea580c; }
 .bunchinfo { font-size: 13px; font-weight: 700; color: #ea580c; margin-top: 4px; text-align: center; }
 .lapcol div.est { font-style: italic; opacity: .8; }
 .sus { background: var(--card); border: 2px dashed var(--accent); border-radius: 12px; padding: 8px 10px; margin-bottom: 10px; font-size: 14px; }
@@ -178,6 +185,7 @@ table.list td.num { text-align: right; font-variant-numeric: tabular-nums; }
   </div>
   <div class="work">
     <div>
+      <div id="fillBanner"></div>
       <div id="sus"></div>
       <div class="sec up" id="upHead">Up next</div>
       <div class="tiles big" id="upTiles"></div>
@@ -210,7 +218,7 @@ table.list td.num { text-align: right; font-variant-numeric: tabular-nums; }
 <script src="vendor/xlsx.full.min.js"></script>
 <script>
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
-const APP_VERSION = 3;
+const APP_VERSION = 4;
 const $ = s => document.querySelector(s);
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
@@ -603,10 +611,9 @@ function renderPad(r) {
   const sug = entry ? r.riders.filter(x => racing(r, x.bib) && x.bib.startsWith(entry)).sort((a, b) => (ord.get(a.bib) ?? 1e9) - (ord.get(b.bib) ?? 1e9)).slice(0, 6) : [];
   $('#disp').innerHTML = `${esc(entry) || '&nbsp;'}<span class="who">${!entry ? 'type a bib or tap a tile' : x ? esc(x.name || 'rider #' + entry) + ' · Pass' : sug.length ? 'tap a bib below or keep typing' : 'not on the start list: Pass adds them'}</span>`;
   $('#sugg').innerHTML = sug.map(x => `<button data-sug="${esc(x.bib)}"><b>${esc(x.bib)}</b><span>${esc(x.name || '')}</span></button>`).join('');
-  const bu = activeBunch();
-  $('#bunchBox').innerHTML = bu
-    ? `<div class="bunchbox"><button class="btn on" data-bunch="end">End bunch</button><button class="btn" data-bunch="new">New bunch</button></div><div class="bunchinfo">Same time for the group: bunch at ${fmtClock(bu.t)} · ${bu.bibs.length} rider${bu.bibs.length === 1 ? '' : 's'} · taps get this time</div>`
-    : `<div class="bunchbox"><button class="btn" data-bunch="new">Bunch</button></div>`;
+  $('#bunchBox').innerHTML = bunchHtml(r);
+  const fb = fillingBunch(r);
+  $('#fillBanner').innerHTML = fb ? `<div class="fillbanner">Adding riders to <b>Bunch ${fb.n}</b> (${fmtClock(fb.t)}): taps get that time · <button class="btn small" data-bunch="done">Done</button></div>` : '';
   const log = r.log.slice(-8).reverse();
   $('#recent').innerHTML = log.map(l => `<div><span>${esc(l.text)}</span><span>${fmtClock(l.t)}</span></div>`).join('');
 }
@@ -653,7 +660,7 @@ function pulledOrder(r) {
 
 /* ---------- Recording passes ---------- */
 let undo = [];
-function snapshot(r) { return JSON.stringify({ passes: r.passes, pulled: r.pulled, dnf: r.dnf, log: r.log, riders: r.riders, startAt: r.startAt, cutOverride: r.cutOverride, finished: r.finished, est: r.est || {} }); }
+function snapshot(r) { return JSON.stringify({ passes: r.passes, pulled: r.pulled, dnf: r.dnf, log: r.log, riders: r.riders, startAt: r.startAt, cutOverride: r.cutOverride, finished: r.finished, est: r.est || {}, bunches: r.bunches || [] }); }
 function remember(r) { undo.push({ id: r.id, s: snapshot(r) }); if (undo.length > 50) undo.shift(); }
 function recordPass(bib, forceN, at) {
   const r = races[cur]; if (!r) return;
@@ -666,9 +673,10 @@ function recordPass(bib, forceN, at) {
   r.est = r.est || {};
   const p = passes(r, bib), k0 = p.length, L = lapLen(r);
   const lastReal = [...p.keys()].reverse().map(i => realPass(r, bib, i + 1)).find(v => v != null);
+  if (k0 && !isEst(r, bib, k0) && now <= p[k0 - 1]) { toast(`#${bib} already has a pass at ${fmtClock(p[k0 - 1])}, after ${fmtClock(now)}. Remove it first (Riders tab).`); return; }
   if (forceN == null && lastReal != null && now - lastReal < 30000) { toast(`#${bib} was already recorded ${Math.round((now - lastReal) / 1000)} s ago`); return; }
   // Marked through by "All through" but tapped soon after: this is that lap's real time, not the next lap.
-  if (forceN == null && k0 && isEst(r, bib, k0) && L && now - p[k0 - 1] < 0.5 * L) {
+  if (forceN == null && k0 && isEst(r, bib, k0) && L && Math.abs(now - p[k0 - 1]) < 0.5 * L && (k0 < 2 || now > p[k0 - 2])) {
     remember(r); dropEst(r, bib, k0); p[k0 - 1] = now; reestimateAll(r); noteTap(bib);
     const g = gapOf(r, bib, k0);
     r.log.push({ t: now, text: `#${bib} ${fmtGap(g).toLowerCase()} L${k0} (was estimated)` });
@@ -686,7 +694,7 @@ function recordPass(bib, forceN, at) {
   (r.passes[bib] = r.passes[bib] || []).push(now);
   reestimateAll(r); noteTap(bib);
   const k = r.passes[bib].length, g = gapOf(r, bib, k), base = baseOf(r), lv = base && g != null ? level(g / base) : null;
-  const lapped = rounds(r) > k;   // the leader has already passed again: this rider is a lap (or more) down
+  const lapped = leaderAt(r, k + 1) != null && leaderAt(r, k + 1) < now;   // the leader had already passed again: a lap (or more) down
   const missed = n > 1 ? ` · missed on lap ${[...Array(n - 1)].map((_, i) => k0 + 1 + i).join(', ')}: ` + [...Array(n - 1)].map((_, i) => { const m = k0 + 1 + i, e = estimate(r, bib, m); return `~${fmtGap(gapOf(r, bib, m)).toLowerCase()} (${e.from})`; }).join(', ') : '';
   let msg = `#${bib}${x.name ? ' ' + x.name : ''}: ${fmtGap(g).toLowerCase()} · lap ${k}${missed}`;
   const redo = m => () => { undoLast(true); recordPass(bib, m, now); };
@@ -743,14 +751,35 @@ function toast(msg, act, bad) {
 ['#toastBtn', '#toastBtn2'].forEach((id, i) => $(id).onclick = () => { const a = toastActs[i]; toastActs = []; $('#toast').classList.add('hidden'); if (a) a.fn(); });
 
 /* ---------- Bunch ---------- */
-// A big group: tap Bunch as it reaches the zone, then tap or type its riders in any order. They all get that time
-// (1 ms apart, in tap order). Ends with End bunch, New bunch, or after 3 minutes without a tap.
-let bunch = null;
-function activeBunch() { if (bunch && (bunch.race !== cur || Date.now() - bunch.last > 180000)) bunch = null; return bunch; }
-function tapTime() { const b = activeBunch(); if (!b) return undefined; b.last = Date.now(); return b.t + b.bibs.length; }
+// A big group: tap Bunch as it reaches the zone. That stamps the time as Bunch 1, 2, … with no riders yet, and your
+// next taps carry on as normal. When there's a break, tap Add riders on that bunch and tap or type its riders in
+// any order: they all get the bunch's time (1 ms apart). Done (or 90 s without a tap) ends adding.
+let filling = null;
+function fillingBunch(r) {
+  if (filling && (filling.race !== r.id || Date.now() - filling.last > 90000)) filling = null;
+  return filling ? (r.bunches || []).find(b => b.n === filling.n) || null : null;
+}
 function pass(bib) {
-  const b = activeBunch(), at = tapTime(), ok = recordPass(bib, undefined, at);
-  if (ok && b) { b.bibs.push(bib); renderPad(races[cur]); }
+  const r = races[cur]; if (!r) return;
+  const b = fillingBunch(r);
+  if (!b) return recordPass(bib);
+  filling.last = Date.now();
+  if (recordPass(bib, undefined, b.t + b.bibs.length)) { b.bibs.push(bib); r.log[r.log.length - 1].text += ` (bunch ${b.n})`; save(); renderPad(r); renderTiles(r); }
+}
+function newBunch(r) {
+  filling = null; remember(r);
+  r.bunches = r.bunches || [];
+  const b = { n: r.bunches.reduce((m, x) => Math.max(m, x.n), 0) + 1, t: Date.now(), bibs: [] };
+  r.bunches.push(b); r.log.push({ t: b.t, text: `Bunch ${b.n}` }); save(); render();
+  toast(`Bunch ${b.n} at ${fmtClock(b.t)}. Keep tapping; add its riders when you have a moment.`, { label: 'Undo', fn: undoLast });
+}
+function bunchHtml(r) {
+  const fb = fillingBunch(r);
+  if (fb) return `<div class="bunchfill"><b>Adding to Bunch ${fb.n}</b> · ${fmtClock(fb.t)} · ${fb.bibs.length} rider${fb.bibs.length === 1 ? '' : 's'}<br>Taps and typed bibs get the bunch's time${fb.bibs.length ? `<br><small>#${fb.bibs.map(esc).join(' #')}</small>` : ''}</div>
+    <div class="bunchbox"><button class="btn on" data-bunch="done">Done</button><button class="btn" data-bunch="new">New bunch</button></div>`;
+  const list = (r.bunches || []).slice(-4).reverse();
+  return `<div class="bunchbox"><button class="btn" data-bunch="new">Bunch</button></div>` + list.map(b => `<div class="bunchrow"><span><b>Bunch ${b.n}</b> ${fmtClock(b.t)} · ${b.bibs.length} rider${b.bibs.length === 1 ? '' : 's'}</span>
+    <button class="btn small" data-bunch="fill" data-n="${b.n}">Add riders</button>${b.bibs.length ? '' : `<button class="btn small danger" data-bunch="del" data-n="${b.n}">✕</button>`}</div>`).join('');
 }
 
 /* ---------- Events ---------- */
@@ -777,12 +806,18 @@ $('#keys').onclick = e => {
 $('.pad').addEventListener('click', e => {
   const s2 = e.target.closest('[data-sug]'), bb = e.target.closest('[data-bunch]');
   if (s2) pass(s2.dataset.sug);
-  else if (bb) {
-    bunch = bb.dataset.bunch === 'new' ? { race: cur, t: Date.now(), last: Date.now(), bibs: [] } : null;
-    if (bunch) toast(`Bunch at ${fmtClock(bunch.t)}: tap or type its riders, any order`);
-    renderPad(races[cur]);
-  }
+  else if (bb) bunchAction(bb);
 });
+$('#fillBanner').addEventListener('click', e => { const bb = e.target.closest('[data-bunch]'); if (bb) bunchAction(bb); });
+function bunchAction(bb) {
+  const r = races[cur]; if (!r) return;
+  const a = bb.dataset.bunch, n = +bb.dataset.n;
+  if (a === 'new') return newBunch(r);
+  if (a === 'fill') filling = { race: r.id, n, last: Date.now() };
+  else if (a === 'done') filling = null;
+  else if (a === 'del') { remember(r); r.bunches = r.bunches.filter(b => b.n !== n); save(); }
+  renderPad(r);
+}
 document.addEventListener('keydown', e => {
   if (!cur || !$('#modal').classList.contains('hidden') || /input|textarea/i.test(e.target.tagName)) return;
   if (/^\d$/.test(e.key) && entry.length < 5) entry += e.key;
@@ -824,7 +859,7 @@ $('#raceView').addEventListener('click', e => {
     const n = prompt('Name (optional):') || ''; remember(r); r.riders.push({ bib: b.trim(), name: n.trim(), team: '', cat: '' }); save(); render();
   }
   else if (t.id === 'unstartBtn') { if (confirm('Clear the race start time?')) { remember(r); delete r.startAt; save(); render(); } }
-  else if (t.id === 'resetBtn') { if (confirm('Clear every pass, pull and DNF for this race?')) { remember(r); Object.assign(r, { passes: {}, pulled: {}, dnf: {}, log: [], finished: false, est: {} }); delete r.startAt; save(); render(); } }
+  else if (t.id === 'resetBtn') { if (confirm('Clear every pass, pull and DNF for this race?')) { remember(r); Object.assign(r, { passes: {}, pulled: {}, dnf: {}, log: [], finished: false, est: {}, bunches: [] }); delete r.startAt; save(); render(); } }
   else if (t.id === 'deleteBtn') { if (confirm('Delete this race from the iPad?')) { delete races[r.id]; save(); renderHome(); } }
 });
 function exportCsv(r) {
@@ -850,6 +885,7 @@ setInterval(() => {
   const r = races[cur]; renderTop(r);
   // Riders move into Up next and the "maybe missed" list as time passes; redraw when either changes, but never
   // within 4 s of a tap (so tiles don't move under a finger).
+  const wasFilling = !!filling; fillingBunch(r); if (wasFilling && !filling) renderPad(r);
   if (Date.now() - lastTapAt < 4000) return;
   const k = (rounds(r) ? suspects(r).map(o => o.x.bib).join() : '') + '|' + layout(r).up.join();
   if (k !== susKey) { susKey = k; renderTiles(r); }
