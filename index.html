@@ -67,7 +67,8 @@ main { padding: 16px; max-width: 1100px; margin: 0 auto; }
 
 .work { display: grid; grid-template-columns: 1fr 300px; gap: 14px; padding: 14px 16px; max-width: 1200px; margin: 0 auto; }
 @media (max-width: 820px) {
-  .work { grid-template-columns: 1fr; } .pad { order: -1; position: static; display: grid; grid-template-columns: 1fr 2fr; gap: 10px; }
+  .work { grid-template-columns: 1fr; } .pad { order: -1; position: static; display: grid; grid-template-columns: 1fr 1.6fr; gap: 0 10px; align-items: start; }
+  .pad > * { grid-column: 1; } .pad > .keys { grid-column: 2; grid-row: 1 / span 6; }
   .disp { font-size: 28px; } .keys { margin-top: 0; grid-row: span 2; } .keys button { min-height: 48px; font-size: 22px; }
   #undoBtn { margin-top: 0 !important; } .recent { display: none; }
 }
@@ -86,6 +87,22 @@ main { padding: 16px; max-width: 1100px; margin: 0 auto; }
 .tile .tag { display: inline-block; font-size: 10px; font-weight: 900; padding: 1px 5px; border-radius: 5px; color: #fff; background: var(--lap); }
 .tile .tag.p { background: var(--pull); } .tile .tag.o { background: var(--over); } .tile .tag.w { background: var(--accent); }
 .tile.watchme { border-style: dashed; border-color: var(--accent); border-width: 3px; }
+.tiles.big { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; }
+.tiles.big .tile { min-height: 92px; } .tiles.big .tile .b { font-size: 36px; }
+.tiles.small { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+.tiles.small .tile { min-height: 54px; padding: 4px; } .tiles.small .tile .b { font-size: 20px; } .tiles.small .tile .n { font-size: 11px; }
+.tile.hit { background: var(--ok) !important; color: #fff !important; border-color: var(--ok) !important; opacity: 1; }
+.tile.hit .g, .tile.hit .n { color: #fff; }
+.sec.up { color: var(--accent); }
+.sugg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+.sugg:empty { display: none; }
+.sugg button { min-height: 56px; border-radius: 10px; border: 2px solid var(--accent); background: var(--card); cursor: pointer; padding: 2px; overflow: hidden; }
+.sugg button b { display: block; font-size: 24px; line-height: 1.1; }
+.sugg button span { display: block; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.bunchbox { margin-top: 10px; display: flex; gap: 8px; }
+.bunchbox .btn { flex: 1; min-height: 52px; font-weight: 800; }
+.bunchbox .btn.on { background: #ea580c; border-color: #ea580c; color: #fff; }
+.bunchinfo { font-size: 13px; font-weight: 700; color: #ea580c; margin-top: 4px; text-align: center; }
 .lapcol div.est { font-style: italic; opacity: .8; }
 .sus { background: var(--card); border: 2px dashed var(--accent); border-radius: 12px; padding: 8px 10px; margin-bottom: 10px; font-size: 14px; }
 .sus div { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 4px 0; flex-wrap: wrap; }
@@ -162,19 +179,23 @@ table.list td.num { text-align: right; font-variant-numeric: tabular-nums; }
   <div class="work">
     <div>
       <div id="sus"></div>
+      <div class="sec up" id="upHead">Up next</div>
+      <div class="tiles big" id="upTiles"></div>
       <div class="sec" id="toComeHead">Still to come</div>
-      <div class="tiles" id="toCome"></div>
+      <div class="tiles small" id="toCome"></div>
       <div class="sec div" id="throughHead">Through this lap</div>
-      <div class="tiles" id="through"></div>
+      <div class="tiles small" id="through"></div>
       <div class="tabs" id="tabs"><button data-t="order" class="on">Passing order</button><button data-t="pulled">Pulled</button><button data-t="riders">Riders</button><button data-t="more">More…</button></div>
       <div id="tabBody"></div>
     </div>
     <div class="pad">
       <div class="disp" id="disp">&nbsp;<span class="who" id="dispWho"></span></div>
+      <div class="sugg" id="sugg"></div>
       <div class="keys" id="keys">
         <button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button>
         <button>7</button><button>8</button><button>9</button><button data-k="del">⌫</button><button>0</button><button data-k="ok" class="enter">Pass</button>
       </div>
+      <div id="bunchBox"></div>
       <button class="btn" id="undoBtn" style="width:100%;margin-top:10px">Undo last</button>
       <div class="recent" id="recent"></div>
     </div>
@@ -189,7 +210,7 @@ table.list td.num { text-align: right; font-variant-numeric: tabular-nums; }
 <script src="vendor/xlsx.full.min.js"></script>
 <script>
 if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
-const APP_VERSION = 2;
+const APP_VERSION = 3;
 const $ = s => document.querySelector(s);
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
@@ -515,35 +536,77 @@ function renderTop(r) {
   $('#status').innerHTML = R ? `<b>Lap ${R}</b> · ${thr.length} through · ${on.length - thr.length} still to come · ${Object.keys(r.pulled).length} pulled${Object.keys(r.dnf).length ? ' · ' + Object.keys(r.dnf).length + ' DNF' : ''}${thr.filter(x => isEst(r, x.bib, R)).length ? ' · ' + thr.filter(x => isEst(r, x.bib, R)).length + ' estimated (~)' : ''}` : `${r.riders.length} riders · waiting for the first pass`;
 }
 function allThrough(r) { const R = rounds(r); const on = r.riders.filter(x => racing(r, x.bib)); return R > 0 && on.length > 0 && on.every(x => passes(r, x.bib).length >= R); }
-function tileHtml(r, x, done) {
+function tileHtml(r, x, done, hit) {
   const p = passes(r, x.bib), k = p.length, g = k ? gapOf(r, x.bib, k) : null, base = baseOf(r), R = rounds(r);
   const lv = g != null && base ? level(g / base) : null, lapped = !done && racing(r, x.bib) && R >= 2 && k < R - 1;
   const cls = ['tile', done ? 'done' : '', lv === 'over' ? 'alert' : lv || '', lapped ? 'lapped' : ''].join(' ');
   const est = k && isEst(r, x.bib, k), watch = est && !done;
   const tag = r.pulled[x.bib] ? '<span class="tag p">PULLED</span>' : r.dnf[x.bib] ? '<span class="tag">DNF</span>' : lapped ? '<span class="tag">LAPPED</span>' : lv === 'over' ? '<span class="tag o">PULL</span>' : watch ? `<span class="tag w">WATCH · missed L${k}</span>` : '';
-  return `<div class="${cls}${watch ? ' watchme' : ''}" data-bib="${esc(x.bib)}"><div class="b">${esc(x.bib)}</div><div class="n">${esc(x.name || '')}</div>
-    <div class="g">${tag || (k ? (est ? '~' : '') + (fmtGap(g)) + ' · L' + k + (est ? ' est.' : '') : '')}</div></div>`;
+  return `<div class="${cls}${watch ? ' watchme' : ''}${hit ? ' hit' : ''}" data-bib="${esc(x.bib)}"><div class="b">${esc(x.bib)}</div><div class="n">${esc(x.name || '')}</div>
+    <div class="g">${hit && racing(r, x.bib) ? '✓ ' : ''}${tag || (k ? (est ? '~' : '') + (fmtGap(g)) + ' · L' + k + (est ? ' est.' : '') : '')}</div></div>`;
+}
+// When each rider should next reach the zone: the leader's time for that lap (projected a lap on if the leader
+// hasn't got there yet) plus the rider's last gap.
+function expectedNext(r, bib) {
+  const k = passes(r, bib).length, R = rounds(r), L = lapLen(r);
+  if (!k) return R ? leaderAt(r, 1) : null;
+  const lead = leaderAt(r, k + 1) ?? (leaderAt(r, R) != null && L ? leaderAt(r, R) + L * (k + 1 - R) : null);
+  return lead == null ? null : lead + (gapOf(r, bib, k) || 0);
+}
+// Riders in the order they should arrive. Up next: due within 90 s (8 to 24 riders, overdue ones at the end).
+function layout(r) {
+  const R = rounds(r), now = Date.now(), idx = new Map(r.riders.map((x, i) => [x.bib, i]));
+  const on = r.riders.filter(x => racing(r, x.bib)).map(x => {
+    const e = expectedNext(r, x.bib);
+    return { bib: x.bib, key: e == null ? Infinity : e < now - 60000 ? now + 90000 : e };
+  }).sort((a, b) => a.key - b.key || idx.get(a.bib) - idx.get(b.bib));
+  const n = Math.min(24, Math.max(8, on.filter(o => o.key <= now + 90000).length));
+  const rest = on.slice(n);
+  return {
+    up: on.slice(0, n).map(o => o.bib),
+    come: rest.filter(o => !R || passes(r, o.bib).length < R).map(o => o.bib),
+    thr: rest.filter(o => R && passes(r, o.bib).length >= R).map(o => o.bib),
+    order: new Map(on.map((o, i) => [o.bib, i])),
+  };
+}
+// Tiles never move while you're tapping: a tapped tile turns green where it is, and the grid tidies itself once
+// you've stopped tapping for 2.5 s.
+const BURST = 2500;
+let frozen = null, lastTapAt = 0, hits = new Set(), tidyTimer = null;
+function noteTap(bib) {
+  lastTapAt = Date.now(); hits.add(bib);
+  clearTimeout(tidyTimer); tidyTimer = setTimeout(() => { if (cur && races[cur]) renderTiles(races[cur]); }, BURST + 50);
 }
 function renderTiles(r) {
-  const R = rounds(r);
-  const on = r.riders.filter(x => racing(r, x.bib));
-  // Still to come: in the order they passed on the previous lap (the order they should arrive), riders a lap or
-  // more down after them; before the first pass, start-list order.
-  const lastT = x => { const p = passes(r, x.bib); return p.length ? p[p.length - 1] : Infinity; };
-  const toCome = on.filter(x => !R || passes(r, x.bib).length < R)
-    .sort((a, b) => passes(r, b.bib).length - passes(r, a.bib).length || lastT(a) - lastT(b));
-  const thr = on.filter(x => R && passes(r, x.bib).length >= R).sort((a, b) => passes(r, a.bib)[R - 1] - passes(r, b.bib)[R - 1]);
-  $('#toComeHead').innerHTML = R ? `<span>Still to come on lap ${R} · ${toCome.length}</span>${toCome.length && !r.finished ? '<button class="btn small" id="closeBtn">All through</button>' : ''}` : `Riders · ${toCome.length} · tap each one as they pass`;
-  const sus = R ? suspects(r) : [];
-  $('#sus').innerHTML = sus.length ? `<div class="sus"><b>Maybe missed: their group came through</b>${sus.map(o => `<div><span><b>#${esc(o.x.bib)}</b> ${esc(o.x.name || '')} · with #${o.ms.map(esc).join(', #')} on lap ${o.lap - 1}, who passed at ${fmtClock(Date.now() - o.ago)}</span><button class="btn small" data-withgroup="${esc(o.x.bib)}">Through with group</button></div>`).join('')}</div>` : '';
-  $('#toCome').innerHTML = toCome.map(x => tileHtml(r, x, false)).join('') || '<div class="status">Everyone still racing is through this lap.</div>';
-  $('#throughHead').textContent = R ? `Through lap ${R} · ${thr.length} (tap again on their next lap)` : '';
-  $('#throughHead').classList.toggle('hidden', !R);
-  $('#through').innerHTML = thr.map(x => tileHtml(r, x, true)).join('');
+  const R = rounds(r), live = !(frozen && frozen.race === r.id && Date.now() - lastTapAt < BURST);
+  if (live) { frozen = { race: r.id, ...layout(r) }; hits = new Set(); }
+  const F = frozen, T = (bib, done) => { const x = riderOf(r, bib); return x ? tileHtml(r, x, done, hits.has(bib)) : ''; };
+  const nCome = r.riders.filter(x => racing(r, x.bib) && (!R || passes(r, x.bib).length < R)).length;
+  $('#upHead').innerHTML = `<span>Up next · in expected order</span>${R && nCome && !r.finished ? '<button class="btn small" id="closeBtn">All through</button>' : ''}`;
+  $('#upTiles').innerHTML = F.up.map(b => T(b, false)).join('') || '<div class="status">Nobody left racing.</div>';
+  $('#toComeHead').innerHTML = R ? `<span>Still to come on lap ${R} · ${nCome} (${F.come.length} more below)</span>` : `Later · ${F.come.length}`;
+  $('#toComeHead').classList.toggle('hidden', !F.come.length);
+  $('#toCome').innerHTML = F.come.map(b => T(b, false)).join('');
+  $('#throughHead').textContent = R ? `Through lap ${R} (tap again on their next lap)` : '';
+  $('#throughHead').classList.toggle('hidden', !R || !F.thr.length);
+  $('#through').innerHTML = F.thr.map(b => T(b, true)).join('');
+  if (live) {
+    const sus = R ? suspects(r) : [];
+    $('#sus').innerHTML = sus.length ? `<div class="sus"><b>Maybe missed: their group came through</b>${sus.map(o => `<div><span><b>#${esc(o.x.bib)}</b> ${esc(o.x.name || '')} · with #${o.ms.map(esc).join(', #')} on lap ${o.lap - 1}, who passed at ${fmtClock(Date.now() - o.ago)}</span><button class="btn small" data-withgroup="${esc(o.x.bib)}">Through with group</button></div>`).join('')}</div>` : '';
+  }
 }
 function renderPad(r) {
   const x = entry && riderOf(r, entry);
-  $('#disp').innerHTML = `${esc(entry) || '&nbsp;'}<span class="who">${entry ? (x ? esc(x.name || 'rider #' + entry) : 'not on the start list: Pass adds them') : 'type a bib or tap a tile'}</span>`;
+
+  // Bibs starting with what's typed, soonest expected first.
+  const ord = frozen && frozen.race === r.id ? frozen.order : layout(r).order;
+  const sug = entry ? r.riders.filter(x => racing(r, x.bib) && x.bib.startsWith(entry)).sort((a, b) => (ord.get(a.bib) ?? 1e9) - (ord.get(b.bib) ?? 1e9)).slice(0, 6) : [];
+  $('#disp').innerHTML = `${esc(entry) || '&nbsp;'}<span class="who">${!entry ? 'type a bib or tap a tile' : x ? esc(x.name || 'rider #' + entry) + ' · Pass' : sug.length ? 'tap a bib below or keep typing' : 'not on the start list: Pass adds them'}</span>`;
+  $('#sugg').innerHTML = sug.map(x => `<button data-sug="${esc(x.bib)}"><b>${esc(x.bib)}</b><span>${esc(x.name || '')}</span></button>`).join('');
+  const bu = activeBunch();
+  $('#bunchBox').innerHTML = bu
+    ? `<div class="bunchbox"><button class="btn on" data-bunch="end">End bunch</button><button class="btn" data-bunch="new">New bunch</button></div><div class="bunchinfo">Same time for the group: bunch at ${fmtClock(bu.t)} · ${bu.bibs.length} rider${bu.bibs.length === 1 ? '' : 's'} · taps get this time</div>`
+    : `<div class="bunchbox"><button class="btn" data-bunch="new">Bunch</button></div>`;
   const log = r.log.slice(-8).reverse();
   $('#recent').innerHTML = log.map(l => `<div><span>${esc(l.text)}</span><span>${fmtClock(l.t)}</span></div>`).join('');
 }
@@ -606,11 +669,11 @@ function recordPass(bib, forceN, at) {
   if (forceN == null && lastReal != null && now - lastReal < 30000) { toast(`#${bib} was already recorded ${Math.round((now - lastReal) / 1000)} s ago`); return; }
   // Marked through by "All through" but tapped soon after: this is that lap's real time, not the next lap.
   if (forceN == null && k0 && isEst(r, bib, k0) && L && now - p[k0 - 1] < 0.5 * L) {
-    remember(r); dropEst(r, bib, k0); p[k0 - 1] = now; reestimateAll(r);
+    remember(r); dropEst(r, bib, k0); p[k0 - 1] = now; reestimateAll(r); noteTap(bib);
     const g = gapOf(r, bib, k0);
     r.log.push({ t: now, text: `#${bib} ${fmtGap(g).toLowerCase()} L${k0} (was estimated)` });
     save(); entry = ''; render(); toast(`#${bib}: lap ${k0} ${fmtGap(g).toLowerCase()} (replaces the estimate)`, { label: 'Undo', fn: undoLast });
-    return;
+    return true;
   }
   let n = forceN, alt = null;
   if (n == null) {
@@ -621,7 +684,7 @@ function recordPass(bib, forceN, at) {
   if (!x) { x = { bib, name: '', team: '', cat: '' }; r.riders.push(x); }
   for (let i = 1; i < n; i++) addEst(r, bib);
   (r.passes[bib] = r.passes[bib] || []).push(now);
-  reestimateAll(r);
+  reestimateAll(r); noteTap(bib);
   const k = r.passes[bib].length, g = gapOf(r, bib, k), base = baseOf(r), lv = base && g != null ? level(g / base) : null;
   const lapped = rounds(r) > k;   // the leader has already passed again: this rider is a lap (or more) down
   const missed = n > 1 ? ` · missed on lap ${[...Array(n - 1)].map((_, i) => k0 + 1 + i).join(', ')}: ` + [...Array(n - 1)].map((_, i) => { const m = k0 + 1 + i, e = estimate(r, bib, m); return `~${fmtGap(gapOf(r, bib, m)).toLowerCase()} (${e.from})`; }).join(', ') : '';
@@ -636,11 +699,12 @@ function recordPass(bib, forceN, at) {
     r.log.push({ t: now, text: `#${bib} PULLED ${lapped ? '(lapped)' : '+' + fmtDur(g)}` });
     save(); entry = ''; render();
     toast(msg, [{ label: 'Keep racing', fn: () => { delete r.pulled[bib]; r.log.push({ t: Date.now(), text: `#${bib} kept racing` }); save(); render(); } }, fix].filter(Boolean), true);
-    return;
+    return true;
   }
   r.log.push({ t: now, text: `#${bib} ${fmtGap(g).toLowerCase()} L${k}${n > 1 ? ` (L${k0 + 1}${n > 2 ? '–' + (k - 1) : ''} missed, ~est.)` : ''}` });
   save(); entry = ''; render();
   toast(msg, [fix, { label: 'Undo', fn: undoLast }].filter(Boolean));
+  return true;
 }
 // "All through": everyone still racing came through this lap, including riders we didn't manage to tap.
 function closeLap(r) {
@@ -661,7 +725,7 @@ function throughWithGroup(r, bib) {
 }
 function undoLast(quiet) {
   const u = undo.pop(); if (!u || !races[u.id]) { toast('Nothing to undo'); return; }
-  Object.assign(races[u.id], JSON.parse(u.s)); save(); render(); if (quiet !== true) toast('Undone');
+  Object.assign(races[u.id], JSON.parse(u.s)); lastTapAt = 0; save(); render(); if (quiet !== true) toast('Undone');
 }
 
 /* ---------- Modal and toast ---------- */
@@ -678,6 +742,17 @@ function toast(msg, act, bad) {
 }
 ['#toastBtn', '#toastBtn2'].forEach((id, i) => $(id).onclick = () => { const a = toastActs[i]; toastActs = []; $('#toast').classList.add('hidden'); if (a) a.fn(); });
 
+/* ---------- Bunch ---------- */
+// A big group: tap Bunch as it reaches the zone, then tap or type its riders in any order. They all get that time
+// (1 ms apart, in tap order). Ends with End bunch, New bunch, or after 3 minutes without a tap.
+let bunch = null;
+function activeBunch() { if (bunch && (bunch.race !== cur || Date.now() - bunch.last > 180000)) bunch = null; return bunch; }
+function tapTime() { const b = activeBunch(); if (!b) return undefined; b.last = Date.now(); return b.t + b.bibs.length; }
+function pass(bib) {
+  const b = activeBunch(), at = tapTime(), ok = recordPass(bib, undefined, at);
+  if (ok && b) { b.bibs.push(bib); renderPad(races[cur]); }
+}
+
 /* ---------- Events ---------- */
 $('#newBtn').onclick = newRace;
 $('#backBtn').onclick = renderHome;
@@ -689,21 +764,30 @@ document.querySelector('.work').addEventListener('click', e => {
     const bib = tile.dataset.bib, now = Date.now();
     if (lastTile.bib === bib && now - lastTile.t < 1500) return;   // accidental double tap
     lastTile = { bib, t: now };
-    return recordPass(bib);
+    return pass(bib);
   }
 });
 $('#keys').onclick = e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.k === 'del') entry = entry.slice(0, -1);
-  else if (b.dataset.k === 'ok') return recordPass(entry);
+  else if (b.dataset.k === 'ok') return pass(entry);
   else if (entry.length < 5) entry += b.textContent;
   renderPad(races[cur]);
 };
+$('.pad').addEventListener('click', e => {
+  const s2 = e.target.closest('[data-sug]'), bb = e.target.closest('[data-bunch]');
+  if (s2) pass(s2.dataset.sug);
+  else if (bb) {
+    bunch = bb.dataset.bunch === 'new' ? { race: cur, t: Date.now(), last: Date.now(), bibs: [] } : null;
+    if (bunch) toast(`Bunch at ${fmtClock(bunch.t)}: tap or type its riders, any order`);
+    renderPad(races[cur]);
+  }
+});
 document.addEventListener('keydown', e => {
   if (!cur || !$('#modal').classList.contains('hidden') || /input|textarea/i.test(e.target.tagName)) return;
   if (/^\d$/.test(e.key) && entry.length < 5) entry += e.key;
   else if (e.key === 'Backspace') entry = entry.slice(0, -1);
-  else if (e.key === 'Enter') return recordPass(entry);
+  else if (e.key === 'Enter') return pass(entry);
   else return;
   renderPad(races[cur]);
 });
@@ -764,8 +848,10 @@ let susKey = '';
 setInterval(() => {
   if (!cur || !races[cur]) return;
   const r = races[cur]; renderTop(r);
-  // A rider joins the "maybe missed" list as time passes; redraw only when the list changes.
-  const k = rounds(r) ? suspects(r).map(o => o.x.bib).join() : '';
+  // Riders move into Up next and the "maybe missed" list as time passes; redraw when either changes, but never
+  // within 4 s of a tap (so tiles don't move under a finger).
+  if (Date.now() - lastTapAt < 4000) return;
+  const k = (rounds(r) ? suspects(r).map(o => o.x.bib).join() : '') + '|' + layout(r).up.join();
   if (k !== susKey) { susKey = k; renderTiles(r); }
 }, 1000);
 

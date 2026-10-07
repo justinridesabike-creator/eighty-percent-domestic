@@ -11,3 +11,7 @@ Missed taps (v2): tap **All through** when the whole field is past and anyone no
 time from the riders they were with; they're flagged WATCH for the next lap. A rider tapped about a lap later than
 their usual gap is treated as missed last lap (estimated), not as a slow lap or a pull; the banner offers the other
 reading when it's unclear. Estimates never count as the leader's time and never pull anyone.
+
+Fast input (v3): tiles never move while you're tapping (they turn green in place; the grid tidies after 2.5 s);
+an Up next band shows the riders due in the next 90 s in expected order; the keypad suggests matching bibs, soonest
+first; Bunch gives a whole group the same time while you tap or type its riders in any order.
